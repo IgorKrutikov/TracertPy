@@ -7,11 +7,11 @@ import ipwhois
 
 class TraceRouter:
     ip_v4_pattern = re.compile(r"([0-9]{1,3}\.){3}[0-9]{1,3}")
-    steps_count = 30
     SHELL_ENCODING = "cp1251"
 
-    def __init__(self, domain_or_ip):
+    def __init__(self, domain_or_ip, steps=30):
         self.domain_or_ip = domain_or_ip
+        self.steps_count = steps
 
     def exec(self):
         proc = subprocess.Popen(f"tracert -h {self.steps_count} -4 {self.domain_or_ip}",
@@ -20,25 +20,19 @@ class TraceRouter:
 
     def get_table_top(self):
         lines = []
-        while self.steps_count < 200:
-            stdout = self.exec()
-            stdout.readline()  # skip blank line
-            st = self.get_ip(stdout.readline())
-            while True:
-                line = stdout.readline()
-                if not line:
-                    break
-                if ip := self.get_ip(line):
-                    lines.append(ip)
-            if st == lines[-1]:
+        stdout = self.exec()
+        stdout.readline()  # skip blank line
+        st = self.get_ip(stdout.readline())
+        while True:
+            line = stdout.readline()
+            if not line:
                 break
-            self.steps_count *= 2
-            lines.clear()
-            print(f"Steps count applied to {self.steps_count}, wait")
-        return lines
+            if ip := self.get_ip(line):
+                lines.append(ip)
+        return st, lines
 
     def get_ip(self, raw_line):
-        string = raw_line.decode("cp1251")
+        string = raw_line.decode(self.SHELL_ENCODING)
         ip_v4 = self.ip_v4_pattern.search(string)
 
         if ip_v4:
@@ -58,7 +52,6 @@ def get_ripe_data(target):
 
 
 def main():
-
     line_pattern = "{:>3}) {:>17} {}"
     parser = argparse.ArgumentParser(
         description="""Пользователь вводит доменное имя или IP адрес.
@@ -69,15 +62,17 @@ def main():
     )
 
     parser.add_argument("target", type=str, help="Доменное имя или IP адрес")
+    parser.add_argument("--hops", default=30, help="Количество прыжков (по умолчанию 30)")
     args = parser.parse_args()
-    tracert = TraceRouter(args.target)
-    path = tracert.get_table_top()
+    tracert = TraceRouter(args.target, args.hops)
+    target_ip, path = tracert.get_table_top()
+    print(f"Трассировка для адреса: {target_ip}")
     for i, line in enumerate(path):
         data = get_ripe_data(line)
         if not data.get("err"):
-            print(line_pattern.format(i+1, line, data["country"] + " " + data["asn"]))
+            print(line_pattern.format(i + 1, line, data["country"] + " " + data["asn"]))
         else:
-            print(line_pattern.format(i+1, line, data["err"]))
+            print(line_pattern.format(i + 1, line, data["err"]))
 
 
 if __name__ == '__main__':
